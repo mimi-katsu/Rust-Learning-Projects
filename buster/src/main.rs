@@ -4,23 +4,32 @@ use reqwest;
 use tokio;
 use std::env;
 use std::sync::{Arc, Mutex};
-// fn build_url (domain: String, directory: String) -> String {
-//     //Check for https/http and add if needed
-//     let url = format!("{}{}", domain, directory);
-//     url
-// }
 
+fn get_args() -> Result<(String, String, usize), io::Error> {
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 4 {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Not enough arguments"));
+    }
+    let ip = args[1].clone();
+    let wordlist = args[2].clone();
+
+    let workers = args[3].clone().parse::<usize>()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "The third argument must be an integer"))?;
+
+    Ok((ip, wordlist, workers))
+}
+
+
+// fn read_wordlist() {
+//     return
+// }
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    let args: Vec<String> = env::args().collect();
-    let ip = String::from(args[1].clone());
-    let wordlist = String::from(args[2].clone());
+    let (ip, wordlist, workers) = get_args()?;
+
     let file = File::open(wordlist)?;
     let reader = BufReader::new(file);
     let mut lines = vec![];
-    let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
-    let mut handles = Vec::new();
-    let urls_tested = Arc::new(Mutex::new(0));
 
     for line in reader.lines() {
         match line {
@@ -33,15 +42,19 @@ async fn main() -> io::Result<()> {
         }
     }
 
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(workers));
+    let mut handles = Vec::new();
+    let urls_tested = Arc::new(Mutex::new(0));
+
     for line in &lines {
         let full_url = format!("{}{}", ip, line);
         let sem_clone = semaphore.clone();
         let urls_total = Arc::clone(&urls_tested);
-
         let handle = tokio::spawn(async move {
             let _permit = sem_clone.acquire().await.unwrap();
 
             let response = reqwest::get(&full_url).await;
+
             match response {
                 Ok(r) => {
                         let mut num = urls_total.lock().unwrap();
